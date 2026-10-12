@@ -1,45 +1,50 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { movies } from './data/movies';
 
 const genres = ['Todos', 'Ação', 'Aventura', 'Drama', 'Comédia', 'Fantasia', 'Sci-Fi', 'Suspense', 'Animação', 'Romance', 'Biografia'];
+const ARCHIVE_ROWS = 24;
 
 function ArchiveCatalog() {
   const [term, setTerm] = useState('');
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('Pesquise pelo título para consultar o acervo do Internet Archive.');
+  const [message, setMessage] = useState('Carregando filmes do Internet Archive...');
 
-  async function searchArchive(event) {
-    event.preventDefault();
-    const safeTerm = term.replace(/[^a-zA-Z0-9À-ÿ\s'-]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!safeTerm) {
-      setItems([]);
-      setTotal(0);
-      setMessage('Digite um título para pesquisar.');
-      return;
-    }
-
+  async function loadArchive(rawTerm = '', nextPage = 1, append = false) {
+    const safeTerm = rawTerm.replace(/[^a-zA-Z0-9À-ÿ\s'-]/g, ' ').replace(/\s+/g, ' ').trim();
     setLoading(true);
     setMessage('');
-    setItems([]);
-    setTotal(0);
+    if (!append) {
+      setItems([]);
+      setTotal(0);
+    }
 
     try {
       const params = new URLSearchParams();
-      params.set('q', `mediatype:movies AND title:"${safeTerm}"`);
+      const query = safeTerm
+        ? `mediatype:movies AND collection:feature_films AND title:"${safeTerm}"`
+        : 'mediatype:movies AND collection:feature_films';
+      params.set('q', query);
       params.append('fl[]', 'identifier');
       params.append('fl[]', 'title');
-      params.set('rows', '24');
-      params.set('page', '1');
+      params.set('rows', String(ARCHIVE_ROWS));
+      params.set('page', String(nextPage));
+      params.append('sort[]', 'downloads desc');
       params.set('output', 'json');
+
       const response = await fetch(`https://archive.org/advancedsearch.php?${params.toString()}`);
       if (!response.ok) throw new Error('Archive search failed');
       const data = await response.json();
       const docs = Array.isArray(data?.response?.docs) ? data.response.docs : [];
-      setItems(docs);
-      setTotal(data?.response?.numFound || docs.length);
-      if (!docs.length) setMessage('Não encontrei resultados com esse título. Tente outra busca.');
+      const resultCount = Number(data?.response?.numFound || 0);
+      setItems((previous) => append ? [...previous, ...docs] : docs);
+      setTotal(resultCount);
+      setPage(nextPage);
+      setHasMore(docs.length > 0 && nextPage * ARCHIVE_ROWS < resultCount);
+      if (!docs.length) setMessage(append ? 'Não há mais resultados.' : 'Nenhum título encontrado. Tente outra busca.');
     } catch {
       setMessage('Não consegui consultar o Internet Archive agora. Tente novamente mais tarde.');
     } finally {
@@ -47,25 +52,34 @@ function ArchiveCatalog() {
     }
   }
 
+  useEffect(() => {
+    loadArchive('', 1, false);
+  }, []);
+
+  function handleSearch(event) {
+    event.preventDefault();
+    loadArchive(term, 1, false);
+  }
+
   return (
     <section className="catalog-section archive-catalog">
       <div className="section-header">
         <h2>Acervo do Internet Archive</h2>
-        <span>{total ? `${items.length} de ${total} resultados` : 'Busca por título'}</span>
+        <span>{loading && items.length === 0 ? 'Carregando...' : `${items.length} de ${total} filmes`}</span>
       </div>
-      <p className="archive-note">Pesquise itens classificados como filmes no Internet Archive. O acervo pode incluir vídeos de eventos; confira a página e a licença de cada item antes de assistir ou baixar.</p>
-      <form className="archive-form" onSubmit={searchArchive}>
+      <p className="archive-note">Filmes do acervo do Internet Archive, ordenados pelos mais acessados. Use a busca ou carregue mais resultados. A licença e a reprodução variam por item; confira os detalhes na página original.</p>
+      <form className="archive-form" onSubmit={handleSearch}>
         <div className="search-box">
           <input
             type="search"
             value={term}
             onChange={(event) => setTerm(event.target.value)}
-            placeholder="Ex.: Nosferatu, Charlie Chaplin..."
+            placeholder="Filtrar por título: Nosferatu, Chaplin..."
             aria-label="Buscar filmes no Internet Archive"
           />
         </div>
         <button className="primary" type="submit" disabled={loading}>
-          {loading ? 'Buscando...' : 'Buscar no acervo'}
+          {loading ? 'Buscando...' : 'Buscar título'}
         </button>
       </form>
       {message && <p className="archive-message" aria-live="polite">{message}</p>}
@@ -87,6 +101,11 @@ function ArchiveCatalog() {
           </article>
         ))}
       </div>
+      {hasMore && (
+        <button className="secondary archive-more" type="button" disabled={loading} onClick={() => loadArchive(term, page + 1, true)}>
+          {loading ? 'Carregando...' : 'Carregar mais filmes'}
+        </button>
+      )}
     </section>
   );
 }
@@ -128,9 +147,7 @@ function App() {
           <div className="brand-mark">C</div>
           <div className="brand-name">CinyNept</div>
         </div>
-        <nav className="nav">
-          <span>Início</span><span>Séries</span><span>Filmes</span><span>Minha Lista</span>
-        </nav>
+        <nav className="nav"><span>Início</span><span>Séries</span><span>Filmes</span><span>Minha Lista</span></nav>
         <div className="profile-pill">N</div>
       </header>
       <main>
@@ -149,9 +166,7 @@ function App() {
         <section className="controls-panel">
           <div className="search-box"><input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar filmes, gêneros ou títulos" /></div>
           <div className="genre-list">
-            {genres.map((genre) => (
-              <button key={genre} className={genre === activeGenre ? 'chip active' : 'chip'} onClick={() => setActiveGenre(genre)}>{genre}</button>
-            ))}
+            {genres.map((genre) => <button key={genre} className={genre === activeGenre ? 'chip active' : 'chip'} onClick={() => setActiveGenre(genre)}>{genre}</button>)}
           </div>
         </section>
         <section className="catalog-section">
@@ -170,9 +185,7 @@ function App() {
           <section className="catalog-section" key={collection.name}>
             <div className="section-header"><h2>{collection.name}</h2></div>
             <div className="movie-row">
-              {collection.items.map((movie) => (
-                <article key={movie.id} className="mini-card" onClick={() => setSelected(movie)}><img src={movie.poster} alt={movie.title} /></article>
-              ))}
+              {collection.items.map((movie) => <article key={movie.id} className="mini-card" onClick={() => setSelected(movie)}><img src={movie.poster} alt={movie.title} /></article>)}
             </div>
           </section>
         ))}
